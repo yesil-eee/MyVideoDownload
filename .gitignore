@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+*.log
+*.tmp
+
+# Virtual env
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# App outputs and installers
+MyVideoDownload/Output/
+*.exe
+*.msi
+*.zip
+*.7z
+
+# ffmpeg binaries (large)
+ffmpeg/
+
+# Cookies and private data
+cookies/
+*.cookies.txt
+*.cookie
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PyInstaller cache
+__pycache__/
+.pyinstaller/
+
+# Logs
+logs/
+MyVideoDownload/logs/
+
+# Misc
+*.bak
+*.old
