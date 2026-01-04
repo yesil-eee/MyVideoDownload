@@ -1,55 +1,85 @@
-# MyVideoDownload
+Aşağıda metnin Türkçe çevirisi yer alıyor:
 
-A Windows desktop YouTube playlist/video downloader built with Python and PySide6, powered by yt-dlp. Provides clean resume behavior (restart current item from scratch, skip finished via archive), max resolution selection, cookies support, and packaged portable/installer builds with ffmpeg.
 
-## Features
-- Max resolution selector (2160p .. 144p)
-- Video (MP4) or Audio (MP3) download
-- Stop and Resume buttons (resume restarts current item; finished ones are skipped via `.download-archive.txt`)
-- Uses yt-dlp with robust format selection and client fallbacks
-- Cookies from file or imported from browser (optional)
-- ffmpeg auto-detection (bundled with builds)
-- Persistent logs under `%LOCALAPPDATA%/MyVideoDownload/logs/app.log`
-- Portable and Installer builds (PyInstaller + Inno Setup)
+---
 
-## Project Structure
-- `MyVideoDownload/myvideodownload/` — app source code (UI and downloader)
-- `MyVideoDownload/dist/` — portable build output (gitignored)
-- `MyVideoDownload/Output/` — installer output (gitignored)
-- `ffmpeg/` — local ffmpeg binaries for packaging (gitignored)
+MyVideoDownload
 
-## Development
-Requires Python 3.10+ on Windows.
+MyVideoDownload, Python ve PySide6 ile geliştirilmiş, yt-dlp altyapısını kullanan bir Windows masaüstü YouTube video/playlist indiricisidir.
+Temiz bir devam etme (resume) mantığı sunar (mevcut öğe baştan başlar, tamamlananlar arşiv sayesinde atlanır), maksimum çözünürlük seçimi, çerez (cookies) desteği ve ffmpeg içeren taşınabilir/kurulumlu paketler sağlar.
 
-```powershell
-# (optional) create venv
+Özellikler
+
+Maksimum çözünürlük seçici (2160p .. 144p)
+
+Video (MP4) veya Ses (MP3) indirme
+
+Durdur ve Devam Et butonları
+(Devam et: mevcut öğeyi baştan başlatır; tamamlananlar .download-archive.txt sayesinde atlanır)
+
+Sağlam format seçimi ve istemci (client) yedekleri ile yt-dlp kullanımı
+
+Dosyadan çerez kullanımı veya tarayıcıdan içe aktarma (opsiyonel)
+
+ffmpeg otomatik algılama (derleme paketleriyle birlikte gelir)
+
+Kalıcı loglar: %LOCALAPPDATA%/MyVideoDownload/logs/app.log
+
+Taşınabilir ve Kurulum paketleri (PyInstaller + Inno Setup)
+
+
+Proje Yapısı
+
+MyVideoDownload/myvideodownload/ — uygulama kaynak kodu (UI ve indirici)
+
+MyVideoDownload/dist/ — taşınabilir derleme çıktısı (gitignored)
+
+MyVideoDownload/Output/ — kurulum çıktısı (gitignored)
+
+ffmpeg/ — paketleme için yerel ffmpeg ikilileri (gitignored)
+
+
+Geliştirme
+
+Windows üzerinde Python 3.10+ gerektirir.
+
+# (opsiyonel) sanal ortam oluştur
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 
-# install deps
+# bağımlılıkları kur
 pip install -U pip
 pip install PySide6 yt-dlp browser-cookie3
 
-# run app
+# uygulamayı çalıştır
 python -m MyVideoDownload.myvideodownload
-```
 
-## Build (Portable and Installer)
-```powershell
-# Portable (PyInstaller)
+Derleme (Taşınabilir ve Kurulum)
+
+# Taşınabilir (PyInstaller)
 .venv\Scripts\python.exe -m PyInstaller -y -n MyVideoDownload -w -i icon_video.ico --onedir MyVideoDownload\myvideodownload\__main__.py
-# Copy ffmpeg & icons next to EXE (if needed)
-# Then run Inno Setup to build installer
+# Gerekirse ffmpeg ve ikonları EXE’nin yanına kopyala
+# Ardından Inno Setup ile kurulum paketini oluştur
 "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" MyVideoDownload\installer.iss
-```
 
-## Usage Tips
-- Default download folder: `C:\\Video Download`
-- Archive file: `.download-archive.txt` in the chosen root folder
-- For private/unlisted videos, provide valid cookies (`cookies.txt` or import from browser)
+Kullanım İpuçları
 
-## License
-Add your preferred license (e.g., MIT) as `LICENSE`.
+Varsayılan indirme klasörü: C:\Video Download
 
-## Credits
-Developed by İlyas YEŞİL. Built with PySide6 and yt-dlp.
+Arşiv dosyası: seçilen kök klasör altında .download-archive.txt
+
+Özel/listelenmemiş videolar için geçerli çerezler sağlayın
+(cookies.txt veya tarayıcıdan içe aktarma)
+
+
+Lisans
+
+Tercih ettiğiniz lisansı (ör. MIT) LICENSE dosyası olarak ekleyin.
+
+Katkıda Bulunanlar
+
+Geliştirici: İlyas YEŞİL
+PySide6 ve yt-dlp ile geliştirilmiştir.
+
+
+---
