@@ -122,63 +122,71 @@ class DownloadWorker(QThread):
 
         ffmpeg_loc = self._detect_ffmpeg()
 
-        # Prefer H.264 MP4 streams within max_height..480; avoid >max & <480
-        # Prefer mp4/h264; first leg prefers m4a audio for faster remux
+        # New resolution logic:
+        # Priority: Selected (max_height) -> 720p -> 480p -> 360p -> best
         mh = max(144, min(int(self.max_height or 1080), 2160))
-        video_format_pref = (
-            f"bestvideo*[height<={mh}][height>=480][vcodec~='^(avc1|avc|h264)']+bestaudio[ext=m4a]/"
-            f"bestvideo*[height<={mh}][height>=480][vcodec~='^(avc1|avc|h264)']+bestaudio/"
-            f"bestvideo*[height<={mh}][height>=480]+bestaudio/"
-            f"best[height<={mh}][height>=480]/"
-            "bestvideo*+bestaudio/best"
-        )
+        
+        # Build format string based on priority
+        # We use a list of formats and join them with '/' which means "try in order"
+        formats = []
+        # 1. Try exact selected height (or best below it if not available)
+        formats.append(f"bestvideo[height={mh}][vcodec~='^(avc1|avc|h264)']+bestaudio[ext=m4a]")
+        formats.append(f"bestvideo[height={mh}]+bestaudio")
+        
+        # 2. Fallbacks in order: 720, 480, 360
+        for fallback in [720, 480, 360]:
+            if fallback < mh:
+                formats.append(f"bestvideo[height={fallback}][vcodec~='^(avc1|avc|h264)']+bestaudio[ext=m4a]")
+                formats.append(f"bestvideo[height={fallback}]+bestaudio")
+        
+        # 3. General best below max height
+        formats.append(f"bestvideo[height<={mh}][vcodec~='^(avc1|avc|h264)']+bestaudio[ext=m4a]")
+        formats.append(f"bestvideo[height<={mh}]+bestaudio")
+        
+        # 4. Absolute best as last resort
+        formats.append("bestvideo+bestaudio/best")
+        
+        video_format_pref = "/".join(formats)
 
-        # Archive file to record finished video IDs (helps skipping already downloaded entries)
+        # Archive file to record finished video IDs
         archive_path = os.path.join(self.root_dir, ".download-archive.txt")
 
         ydl_opts: Dict[str, Any] = {
             "outtmpl": outtmpl,
             "noplaylist": False,
-            # Continue playlist on individual entry errors
             "ignoreerrors": True,
-            # restart entries from scratch on next runs; rely on archive to skip finished ones
-            "continuedl": False,
-            # ensure we re-download/overwrite any partial or existing targets on restart
-            "overwrites": True,
-            # Track downloaded IDs to avoid re-download and aid diagnostics (unless ignored by user)
+            "continuedl": True,
+            "overwrites": False, # Changed to False to allow resuming partial downloads
             "merge_output_format": "mp4",
             "progress_hooks": [self._hook],
             "logger": self._logger,
-            "concurrent_fragment_downloads": 3,
-            "retries": 20,
-            "fragment_retries": 10,
+            "concurrent_fragment_downloads": 5, # Increased for better speed
+            "retries": 30, # Increased retries
+            "fragment_retries": 20,
             "quiet": True,
             "no_warnings": True,
-            # Prefer Web client first (android may cause 403 per yt-dlp warning)
             "extractor_args": {
                 "youtube": {
-                    # Try multiple clients as fallbacks (web first)
                     "player_client": ["web", "ios", "android", "tvhtml5"],
+                    "skip": ["dash", "hls"], # Optimization: skip manifests if possible
                 }
             },
             "geo_bypass": True,
-            # Chunked downloads can avoid some 403 issues
-            "http_chunk_size": 2 * 1024 * 1024,  # 2 MiB
-            # Sort resolutions preferring at/below selected max height
-            "format_sort": [self._build_res_sort(), "vcodec:h264"],
+            "http_chunk_size": 10 * 1024 * 1024,  # 10 MiB for better throughput
+            "format_sort": [f"res:{mh}", "vcodec:h264", "acodec:m4a"],
             "http_headers": {
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/124.0 Safari/537.36"
                 ),
-                "Referer": self.url,
+                "Referer": "https://www.google.com/",
                 "Origin": "https://www.youtube.com",
                 "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
                 "Connection": "keep-alive",
             },
         }
-        # Respect archive usage unless user asked to ignore
+        
         if not self.ignore_archive:
             ydl_opts["download_archive"] = archive_path
         if ffmpeg_loc:
@@ -186,9 +194,8 @@ class DownloadWorker(QThread):
         if self.cookies_path and os.path.exists(self.cookies_path):
             ydl_opts["cookiefile"] = self.cookies_path
         elif self.cookies_from_browser:
-            # e.g., 'brave', 'chrome', 'edge', 'firefox' -- must be a tuple
             ydl_opts["cookiesfrombrowser"] = (self.cookies_from_browser,)
-        # Ensure autonumber starts at 1
+            
         ydl_opts["autonumber_start"] = 1
 
         if self.mode == "mp4":
@@ -204,16 +211,6 @@ class DownloadWorker(QThread):
             ]
         return ydl_opts
 
-    def _build_res_sort(self) -> str:
-        order = [2160, 1440, 1080, 720, 480, 360, 240, 144]
-        mh = max(144, min(int(self.max_height or 1080), 2160))
-        # Keep only entries <= mh, in descending order, but yt-dlp likes highest first when sorting
-        kept = [str(h) for h in order if h <= mh]
-        if not kept:
-            kept = ["144"]
-        return "res:" + ",".join(kept)
-
-    # --- temporary in-memory error capture ---
     def _attach_temp_log_handler(self):
         if self._temp_handler:
             return
@@ -222,10 +219,8 @@ class DownloadWorker(QThread):
             def emit(self, record: logging.LogRecord):
                 try:
                     msg = record.getMessage()
-                    # Heuristic: per-entry errors from yt-dlp often look like
-                    # "ERROR: [youtube] <id>: <reason>" or contain known phrases
                     if record.levelno >= logging.ERROR and (
-                        "[youtube]" in msg or "This video" in msg or "Private" in msg or "No video formats" in msg or "Members only" in msg or "HTTP Error 403" in msg
+                        "[youtube]" in msg or "This video" in msg or "Private" in msg or "No video formats" in msg or "Members only" in msg or "HTTP Error 403" in msg or "Sign in" in msg
                     ):
                         worker.skipped.emit(msg)
                 except Exception:
@@ -243,9 +238,7 @@ class DownloadWorker(QThread):
             self._temp_handler = None
 
     def _hook(self, d: Dict[str, Any]) -> None:
-        # cooperative cancel
         if self._stop:
-            # Use KeyboardInterrupt to ensure yt-dlp aborts the whole playlist immediately
             raise KeyboardInterrupt("Cancelled by user")
         status = d.get("status")
         title = d.get("info_dict", {}).get("title") or d.get("filename") or ""
@@ -261,7 +254,6 @@ class DownloadWorker(QThread):
             self.progress.emit(percent, speed, eta, title)
             self._logger.info("downloading: %s %.1f%% %s ETA %s", title, percent, speed, eta)
         elif status == "finished":
-            # will be merged/extracted next
             self._saw_download = True
             self.progress.emit(100.0, "", "", title)
             self._logger.info("finished download stage: %s", title)
@@ -273,97 +265,58 @@ class DownloadWorker(QThread):
                 pass
 
     def run(self) -> None:
-        self._logger.info(
-            "start: url=%s mode=%s root=%s max=%sp ignore_archive=%s cookies_file=%s cookies_browser=%s",
-            self.url, self.mode, self.root_dir, self.max_height, self.ignore_archive, self.cookies_path, getattr(self, 'cookies_from_browser', None)
-        )
-        # Attempt 1
+        self._logger.info("Starting download: %s", self.url)
         self._attach_temp_log_handler()
-        try:
-            with yt_dlp.YoutubeDL(self._build_opts()) as ydl:
-                ydl.download([self.url])
-            if not self._saw_download:
-                raise Exception("No media downloaded. Possibly unavailable formats or all entries skipped.")
-            self.finished.emit(True, self.root_dir)
-            self._logger.info("success: %s", self.url)
-            return
-        except KeyboardInterrupt as ki:
-            self._logger.info("cancelled during attempt1: %s", ki)
-            self.finished.emit(False, "Cancelled by user")
-            return
-        except Exception as e1:
-            msg = str(e1)
-            self._logger.error("attempt1 error: %s", msg, exc_info=True)
-            # If user pressed stop, don't attempt fallbacks
-            if self._stop:
-                self.finished.emit(False, "Cancelled by user")
-                return
-            # Fallback only for common HTTP 403 / forbidden / sign-in gate
-            if "403" not in msg and "Forbidden" not in msg and "Sign in" not in msg:
-                self.finished.emit(False, msg)
-                return
-        # Attempt 2: relax format, change client to iOS and disable chunking
+        
+        # Main attempt with all clients
         try:
             opts = self._build_opts()
-            # Switch to iOS client explicitly
-            opts.setdefault("extractor_args", {}).setdefault("youtube", {})["player_client"] = ["ios"]
-            # Looser format but keep max..360 bound
-            if self.mode == "mp4":
-                mh = max(144, min(int(self.max_height or 1080), 2160))
-                opts["format"] = (
-                    f"bestvideo*[height<={mh}][height>=360]+bestaudio/"
-                    f"best[height<={mh}]/best"
-                )
-            # Smaller chunks or disable
-            opts["http_chunk_size"] = 0  # let yt-dlp decide
-            self._logger.info("fallback attempt: iOS client, relaxed format")
-            self._saw_download = False
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([self.url])
-            if not self._saw_download:
-                raise Exception("No media downloaded in fallback attempt.")
-            self.finished.emit(True, self.root_dir)
-            self._logger.info("success (fallback/iOS): %s", self.url)
-        except KeyboardInterrupt as ki2:
-            self._logger.info("cancelled during attempt2: %s", ki2)
+            
+            if not self._saw_download and not self._stop:
+                # Check if it was just already downloaded (archive)
+                archive_path = os.path.join(self.root_dir, ".download-archive.txt")
+                if os.path.exists(archive_path) and not self.ignore_archive:
+                    self._logger.info("No new downloads, but archive exists. Likely already downloaded.")
+                    self.finished.emit(True, self.root_dir)
+                    return
+                raise Exception("No media downloaded. Possibly unavailable formats or all entries skipped.")
+            
+            if self._stop:
+                self.finished.emit(False, "Cancelled by user")
+            else:
+                self.finished.emit(True, self.root_dir)
+            return
+            
+        except KeyboardInterrupt:
             self.finished.emit(False, "Cancelled by user")
             return
-        except Exception as e2:
-            self._logger.error("attempt2 error: %s", e2, exc_info=True)
+        except Exception as e:
+            msg = str(e)
+            self._logger.error("Main attempt error: %s", msg)
+            
             if self._stop:
                 self.finished.emit(False, "Cancelled by user")
                 return
-            # If still a format error, one last try with plain 'best'
-            msg2 = str(e2)
-            if "Requested format is not available" in msg2 or "No video formats" in msg2:
+
+            # Fallback for 403/Sign-in: Try iOS client specifically as it often bypasses some restrictions
+            if "403" in msg or "Forbidden" in msg or "Sign in" in msg or "confirm your age" in msg:
                 try:
+                    self._logger.info("Attempting fallback with iOS client...")
                     opts = self._build_opts()
-                    opts["format"] = "best"
-                    # Try android as last option
-                    opts.setdefault("extractor_args", {}).setdefault("youtube", {})["player_client"] = ["android"]
-                    self._logger.info("final attempt: format=best, client=android")
-                    self._saw_download = False
+                    opts["extractor_args"]["youtube"]["player_client"] = ["ios"]
+                    opts["http_chunk_size"] = 0 # Disable chunking for fallback
+                    
                     with yt_dlp.YoutubeDL(opts) as ydl:
                         ydl.download([self.url])
-                    if not self._saw_download:
-                        raise Exception("No media downloaded in final attempt.")
-                    self.finished.emit(True, self.root_dir)
-                    self._logger.info("success (final/android): %s", self.url)
-                    return
-                except KeyboardInterrupt as ki3:
-                    self._logger.info("cancelled during final attempt: %s", ki3)
-                    self.finished.emit(False, "Cancelled by user")
-                    return
-                except Exception as e3:
-                    self._logger.error("final attempt error: %s", e3, exc_info=True)
-                    if self._stop:
-                        self.finished.emit(False, "Cancelled by user")
-                    else:
-                        self.finished.emit(False, str(e3))
-            else:
-                if self._stop:
-                    self.finished.emit(False, "Cancelled by user")
-                else:
-                    self.finished.emit(False, msg2)
+                    
+                    if self._saw_download:
+                        self.finished.emit(True, self.root_dir)
+                        return
+                except Exception as fe:
+                    self._logger.error("Fallback error: %s", fe)
+            
+            self.finished.emit(False, msg)
         finally:
             self._detach_temp_log_handler()

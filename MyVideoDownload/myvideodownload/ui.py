@@ -518,7 +518,12 @@ class MainWindow(QMainWindow):
             pass
         # Open with default editor
         try:
-            os.startfile(log_path)  # type: ignore[attr-defined]
+            if sys.platform == "win32":
+                os.startfile(log_path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", log_path])
+            else:
+                subprocess.Popen(["xdg-open", log_path])
         except Exception:
             try:
                 subprocess.Popen([sys.executable, "-m", "pydoc", log_path])
