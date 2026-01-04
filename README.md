@@ -4,7 +4,7 @@ MyVideoDownload, Python ve PySide6 ile geliştirilmiş, yt-dlp altyapısını ku
 Temiz bir devam etme (resume) mantığı sunar (mevcut öğe baştan başlar, tamamlananlar arşiv sayesinde atlanır), maksimum çözünürlük seçimi, çerez (cookies) desteği ve ffmpeg içeren taşınabilir/kurulumlu paketler sağlar.
 
 Özellikler
-'''
+'''bash
 Maksimum çözünürlük seçici (2160p .. 144p)
 
 Video (MP4) veya Ses (MP3) indirme
